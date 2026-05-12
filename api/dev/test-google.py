@@ -3,11 +3,11 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from io import BytesIO
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from io import BytesIO
 
 from guia_ai import extract_data, validate_data, review_data
 from guia_schema import normalize_result, VALID_STATES
@@ -26,7 +26,7 @@ def json_response(handler, status, payload):
     handler.wfile.write(body)
 
 
-def get_drive_service():
+def get_google_services():
     client_email = os.environ.get("GOOGLE_CLIENT_EMAIL")
     private_key = os.environ.get("GOOGLE_PRIVATE_KEY", "").replace("\\n", "\n")
 
@@ -40,10 +40,16 @@ def get_drive_service():
             "private_key": private_key,
             "token_uri": "https://oauth2.googleapis.com/token",
         },
-        scopes=["https://www.googleapis.com/auth/drive.readonly"],
+        scopes=[
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/spreadsheets",
+        ],
     )
 
-    return build("drive", "v3", credentials=credentials)
+    return (
+        build("drive", "v3", credentials=credentials),
+        build("sheets", "v4", credentials=credentials),
+    )
 
 
 def list_drive_files(drive, folder_id):
@@ -69,6 +75,53 @@ def download_file(drive, file_id):
         _, done = downloader.next_chunk()
 
     return buffer.getvalue()
+
+
+def build_destino(data):
+    parts = [
+        data.get("destino_empresa", ""),
+        data.get("destino_direccion", ""),
+        data.get("destino_comuna", ""),
+    ]
+
+    return " - ".join([part for part in parts if part])
+
+
+def build_sheet_row(result):
+    data = result.get("data", {})
+
+    return [
+        data.get("correlativo", ""),
+        data.get("tipo_guia", ""),
+        data.get("numero_guia", ""),
+        data.get("marca", ""),
+        data.get("modelo", ""),
+        data.get("chassis_serie", ""),
+        data.get("posicion_lote_codigo", ""),
+        data.get("origen", ""),
+        build_destino(data),
+        data.get("comentarios", ""),
+        data.get("tipo_factura", ""),
+    ]
+
+
+def append_sheet_row(sheets, result):
+    spreadsheet_id = os.environ.get("GOOGLE_SHEET_ID")
+
+    if not spreadsheet_id:
+        raise ValueError("Missing GOOGLE_SHEET_ID")
+
+    row = build_sheet_row(result)
+
+    sheets.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range="A:K",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [row]},
+    ).execute()
+
+    return row
 
 
 def process_image(image_path):
@@ -142,7 +195,7 @@ class handler:
                     "error": "Missing OPENAI_API_KEY",
                 })
 
-            drive = get_drive_service()
+            drive, sheets = get_google_services()
             files = list_drive_files(drive, folder_id)
 
             first_image = next(
@@ -157,6 +210,7 @@ class handler:
                     "count": len(files),
                     "files": files,
                     "result": None,
+                    "sheetWritten": False,
                 })
 
             binary = download_file(drive, first_image["id"])
@@ -173,6 +227,13 @@ class handler:
 
             result["archivo"] = first_image["name"]
 
+            sheet_row = None
+            sheet_written = False
+
+            if result.get("estado") in {"OK", "REVISAR"}:
+                sheet_row = append_sheet_row(sheets, result)
+                sheet_written = True
+
             return json_response(self, 200, {
                 "ok": True,
                 "folderId": folder_id,
@@ -183,6 +244,8 @@ class handler:
                     "mimeType": first_image["mimeType"],
                     "sizeBytes": len(binary),
                 },
+                "sheetWritten": sheet_written,
+                "sheetRow": sheet_row,
                 "extracted": extracted,
                 "validation": validation,
                 "review": review,
