@@ -25,16 +25,17 @@ export default async function handler(req, res) {
     const drive = google.drive({ version: "v3", auth: client });
 
     const response = await drive.files.list({
-      q: `'${folderId}' in parents and trashed = false and (mimeType = 'image/jpeg' or name contains '.jpg' or name contains '.jpeg')`,
+      q: `'${folderId}' in parents and trashed = false`,
       fields: "files(id,name,mimeType,createdTime,modifiedTime)",
       orderBy: "createdTime desc",
-      pageSize: 20,
+      pageSize: 50,
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,
     });
 
     return res.status(200).json({
       ok: true,
+      folderId,
       count: response.data.files?.length || 0,
       files: response.data.files || [],
     });
