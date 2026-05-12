@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 
-import { extractData, validateData } from "../../lib/guia/ai.js";
-import { normalizeResult } from "../../lib/guia/schema.js";
+import { extractData, validateData, reviewData } from "../../lib/guia/ai.js";
+import { normalizeResult, VALID_STATES } from "../../lib/guia/schema.js";
 
 export default async function handler(req, res) {
   try {
@@ -79,10 +79,43 @@ export default async function handler(req, res) {
       extractedData: extracted,
     });
 
-    const result = normalizeResult({
+    let result = normalizeResult({
       ...extracted,
       ...validation,
     });
+
+    let review = null;
+    let reviewApplied = false;
+
+    if (result.estado === "REVISAR") {
+      reviewApplied = true;
+
+      review = await reviewData({
+        base64,
+        mimeType: firstImage.mimeType,
+        validatedData: result,
+      });
+
+      const corrections = review.correcciones || {};
+
+      result.data = {
+        ...result.data,
+        ...corrections,
+      };
+
+      result = normalizeResult(result);
+
+      let estadoFinal = review.estado_final || "REVISAR";
+
+      if (!VALID_STATES.has(estadoFinal)) {
+        estadoFinal = "REVISAR";
+      }
+
+      result.estado = estadoFinal;
+      result.observaciones = Array.isArray(review.observaciones_finales)
+        ? review.observaciones_finales
+        : result.observaciones;
+    }
 
     return res.status(200).json({
       ok: true,
@@ -94,8 +127,10 @@ export default async function handler(req, res) {
         mimeType: firstImage.mimeType,
         sizeBytes: buffer.length,
       },
+      reviewApplied,
       extracted,
       validation,
+      review,
       result,
     });
   } catch (error) {
