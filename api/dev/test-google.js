@@ -1,5 +1,8 @@
 import { google } from "googleapis";
 
+import { extractData, validateData } from "../../lib/guia/ai.js";
+import { normalizeResult } from "../../lib/guia/schema.js";
+
 export default async function handler(req, res) {
   try {
     const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
@@ -10,6 +13,13 @@ export default async function handler(req, res) {
       return res.status(500).json({
         ok: false,
         error: "Missing GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY or GOOGLE_DRIVE_FOLDER_ID",
+      });
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({
+        ok: false,
+        error: "Missing OPENAI_API_KEY",
       });
     }
 
@@ -42,7 +52,7 @@ export default async function handler(req, res) {
         folderId,
         count: files.length,
         files,
-        downloaded: null,
+        result: null,
       });
     }
 
@@ -58,21 +68,38 @@ export default async function handler(req, res) {
     const buffer = Buffer.from(downloadResponse.data);
     const base64 = buffer.toString("base64");
 
+    const extracted = await extractData({
+      base64,
+      mimeType: firstImage.mimeType,
+    });
+
+    const validation = await validateData({
+      base64,
+      mimeType: firstImage.mimeType,
+      extractedData: extracted,
+    });
+
+    const result = normalizeResult({
+      ...extracted,
+      ...validation,
+    });
+
     return res.status(200).json({
       ok: true,
       folderId,
       count: files.length,
-      files,
-      downloaded: {
+      file: {
         id: firstImage.id,
         name: firstImage.name,
         mimeType: firstImage.mimeType,
         sizeBytes: buffer.length,
-        base64Prefix: base64.slice(0, 40),
       },
+      extracted,
+      validation,
+      result,
     });
   } catch (error) {
-    console.error("test-google drive error", error);
+    console.error("test-google process error", error);
 
     return res.status(500).json({
       ok: false,
