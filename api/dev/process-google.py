@@ -35,11 +35,11 @@ def normalize_numero_guia(value):
 
 
 def redis_command(command):
-    url = os.environ.get("UPSTASH_REDIS_REST_URL")
-    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+    url = os.environ.get("KV_REST_API_URL")
+    token = os.environ.get("KV_REST_API_TOKEN")
 
     if not url or not token:
-        raise ValueError("Missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN")
+        raise ValueError("Missing KV_REST_API_URL or KV_REST_API_TOKEN")
 
     request = urllib.request.Request(
         url,
