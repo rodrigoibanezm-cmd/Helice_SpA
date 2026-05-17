@@ -249,6 +249,54 @@ def process_image(image_path):
     return extracted, validation, review, result
 
 
+def process_drive_image(drive, sheets, image_file):
+    binary = download_file(drive, image_file["id"])
+    suffix = Path(image_file["name"]).suffix or ".jpg"
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(binary)
+        tmp_path = Path(tmp.name)
+
+    try:
+        extracted, validation, review, result = process_image(tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    result["archivo"] = image_file["name"]
+
+    source = {
+        "drive_file_id": image_file["id"],
+        "filename": image_file["name"],
+        "mimeType": image_file["mimeType"],
+        "sizeBytes": len(binary),
+    }
+
+    sheet_row = None
+    sheet_written = False
+    envelope = None
+    bitacora_event = None
+
+    if result.get("estado") in {"OK", "REVISAR"}:
+        envelope, bitacora_event = save_guia_envelope(result, source)
+        sheet_row = append_sheet_row(sheets, result)
+        sheet_written = True
+
+    return {
+        "ok": True,
+        "file": source,
+        "sheetWritten": sheet_written,
+        "sheetRow": sheet_row,
+        "upstashSaved": envelope is not None,
+        "duplicate": envelope.get("duplicate") if envelope else False,
+        "storageKey": envelope.get("storage_key") if envelope else None,
+        "bitacoraEvent": bitacora_event,
+        "extracted": extracted,
+        "validation": validation,
+        "review": review,
+        "result": result,
+    }
+
+
 def app(environ, start_response):
     try:
         folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
@@ -268,75 +316,46 @@ def app(environ, start_response):
 
         drive, sheets = get_google_services()
         files = list_drive_files(drive, folder_id)
+        image_files = [f for f in files if f.get("mimeType", "").startswith("image/")]
 
-        first_image = next(
-            (f for f in files if f.get("mimeType", "").startswith("image/")),
-            None,
-        )
+        results = []
+        processed = 0
+        written = 0
+        duplicates = 0
+        errors = 0
 
-        if not first_image:
-            return response_json(start_response, 200, {
-                "ok": True,
-                "runtime": "python",
-                "folderId": folder_id,
-                "count": len(files),
-                "files": files,
-                "result": None,
-                "sheetWritten": False,
-            })
-
-        binary = download_file(drive, first_image["id"])
-        suffix = Path(first_image["name"]).suffix or ".jpg"
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(binary)
-            tmp_path = Path(tmp.name)
-
-        try:
-            extracted, validation, review, result = process_image(tmp_path)
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
-        result["archivo"] = first_image["name"]
-
-        sheet_row = None
-        sheet_written = False
-        envelope = None
-        bitacora_event = None
-
-        if result.get("estado") in {"OK", "REVISAR"}:
-            source = {
-                "drive_file_id": first_image["id"],
-                "filename": first_image["name"],
-                "mimeType": first_image["mimeType"],
-                "sizeBytes": len(binary),
-            }
-
-            envelope, bitacora_event = save_guia_envelope(result, source)
-            sheet_row = append_sheet_row(sheets, result)
-            sheet_written = True
+        for image_file in image_files:
+            try:
+                item = process_drive_image(drive, sheets, image_file)
+                processed += 1
+                if item.get("sheetWritten"):
+                    written += 1
+                if item.get("duplicate"):
+                    duplicates += 1
+                results.append(item)
+            except Exception as error:
+                errors += 1
+                results.append({
+                    "ok": False,
+                    "file": {
+                        "id": image_file.get("id"),
+                        "name": image_file.get("name"),
+                        "mimeType": image_file.get("mimeType"),
+                    },
+                    "error": str(error),
+                })
 
         return response_json(start_response, 200, {
-            "ok": True,
+            "ok": errors == 0,
             "runtime": "python",
             "folderId": folder_id,
-            "count": len(files),
-            "file": {
-                "id": first_image["id"],
-                "name": first_image["name"],
-                "mimeType": first_image["mimeType"],
-                "sizeBytes": len(binary),
-            },
-            "sheetWritten": sheet_written,
-            "sheetRow": sheet_row,
-            "upstashSaved": envelope is not None,
-            "duplicate": envelope.get("duplicate") if envelope else False,
-            "storageKey": envelope.get("storage_key") if envelope else None,
-            "bitacoraEvent": bitacora_event,
-            "extracted": extracted,
-            "validation": validation,
-            "review": review,
-            "result": result,
+            "totalFiles": len(files),
+            "totalImages": len(image_files),
+            "processed": processed,
+            "written": written,
+            "duplicates": duplicates,
+            "errors": errors,
+            "results": results,
         })
 
     except Exception as error:
