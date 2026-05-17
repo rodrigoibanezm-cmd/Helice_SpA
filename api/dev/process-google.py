@@ -32,7 +32,14 @@ def response_json(start_response, status_code, payload):
 
 
 def get_query_params(environ):
-    return urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
+    query_string = environ.get("QUERY_STRING", "")
+
+    if not query_string:
+        request_uri = environ.get("REQUEST_URI", "") or environ.get("RAW_URI", "")
+        if "?" in request_uri:
+            query_string = request_uri.split("?", 1)[1]
+
+    return urllib.parse.parse_qs(query_string)
 
 
 def normalize_numero_guia(value):
