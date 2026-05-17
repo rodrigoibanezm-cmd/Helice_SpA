@@ -3,10 +3,10 @@
 ## Flujo operativo actual
 
 ```txt
-1. operador sube imagen a carpeta pendientes
-2. endpoint process-google.py procesa imagen
-3. Google Sheets recibe fila
-4. Upstash guarda respaldo estructurado
+1. operador sube imágenes a carpeta pendientes
+2. endpoint process-google.py procesa todas las imágenes secuencialmente
+3. Upstash guarda respaldo estructurado por guía
+4. Google Sheets recibe solo guías nuevas
 5. operador revisa resultado
 ```
 
@@ -28,8 +28,16 @@ HISTORICO
 Estado actual validado:
 
 ```txt
-- Sheets recibe fila A:K
-- duplicados también se escriben en Sheets
+- Sheets recibe fila A:K solo si la guía no es duplicada
+- duplicados NO se escriben en Sheets
+- duplicados sí se guardan en Upstash
+```
+
+Objetivo operativo:
+
+```txt
+Sheets = operación limpia
+Upstash = histórico técnico / auditoría
 ```
 
 ## Upstash Redis
@@ -73,9 +81,24 @@ Regla MVP:
 
 ```txt
 - no se bloquean duplicados
-- se guardan con sufijo
-- se escriben igual en Sheets
+- se guardan con sufijo en Upstash
+- no se escriben en Sheets
 - se registra bitácora
+```
+
+## Batch
+
+El endpoint procesa todas las imágenes encontradas en pendientes.
+
+Reglas:
+
+```txt
+- procesamiento secuencial
+- si una imagen falla, no cae todo el batch
+- errors cuenta fallas aisladas
+- processed cuenta imágenes procesadas exitosamente
+- written cuenta filas efectivamente escritas en Sheets
+- duplicates cuenta guías repetidas detectadas por numero_guia
 ```
 
 ## Bitácora
@@ -88,9 +111,9 @@ helice:bitacora
 
 Se escribe con LPUSH.
 
-## Prueba validada
+## Pruebas validadas
 
-Primera corrida:
+Primera corrida individual:
 
 ```txt
 duplicate=False
@@ -99,13 +122,23 @@ upstashSaved=True
 sheetWritten=True
 ```
 
-Segunda corrida:
+Segunda corrida individual:
 
 ```txt
 duplicate=True
 storageKey=helice:guia:numero:492060_resp
 upstashSaved=True
-sheetWritten=True
+sheetWritten=False
+```
+
+Batch duplicado limpio:
+
+```txt
+totalImages=5
+processed=5
+written=0
+duplicates=5
+errors=0
 ```
 
 ## Runtime validado
