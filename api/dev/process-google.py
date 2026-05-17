@@ -2,6 +2,7 @@ import json
 import os
 import re
 import tempfile
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,10 @@ def response_json(start_response, status_code, payload):
     ]
     start_response(status, headers)
     return [body]
+
+
+def get_query_params(environ):
+    return urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
 
 
 def normalize_numero_guia(value):
@@ -308,16 +313,30 @@ def app(environ, start_response):
                 "error": "Missing GOOGLE_DRIVE_FOLDER_ID",
             })
 
+        query = get_query_params(environ)
+        mode = query.get("mode", ["process"])[0]
+
+        drive, sheets = get_google_services()
+        files = list_drive_files(drive, folder_id)
+        image_files = [f for f in files if f.get("mimeType", "").startswith("image/")]
+
+        if mode == "list":
+            return response_json(start_response, 200, {
+                "ok": True,
+                "runtime": "python",
+                "mode": "list",
+                "folderId": folder_id,
+                "totalFiles": len(files),
+                "totalImages": len(image_files),
+                "files": image_files,
+            })
+
         if not os.environ.get("OPENAI_API_KEY"):
             return response_json(start_response, 500, {
                 "ok": False,
                 "runtime": "python",
                 "error": "Missing OPENAI_API_KEY",
             })
-
-        drive, sheets = get_google_services()
-        files = list_drive_files(drive, folder_id)
-        image_files = [f for f in files if f.get("mimeType", "").startswith("image/")]
 
         results = []
         processed = 0
@@ -349,6 +368,7 @@ def app(environ, start_response):
         return response_json(start_response, 200, {
             "ok": errors == 0,
             "runtime": "python",
+            "mode": "process",
             "folderId": folder_id,
             "totalFiles": len(files),
             "totalImages": len(image_files),
