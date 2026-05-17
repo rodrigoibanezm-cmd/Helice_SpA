@@ -16,6 +16,44 @@
 GET /api/dev/process-google.py
 ```
 
+## Modo seguro sin OpenAI
+
+Para listar pendientes sin gastar tokens ni tocar Sheets/Upstash:
+
+```txt
+GET /api/dev/process-google.py?mode=list
+```
+
+Este modo solo hace:
+
+```txt
+- lista archivos de Drive
+- filtra imágenes
+- devuelve totalFiles, totalImages y files[]
+```
+
+No hace:
+
+```txt
+- descarga de imágenes
+- OpenAI
+- escritura Sheets
+- escritura Upstash
+```
+
+Prueba validada:
+
+```txt
+mode=list
+totalImages=5
+files:
+- guia_04.jpg
+- guia_03.jpg
+- guia1.jpeg
+- guia_01.jpg
+- guia_02.jpg
+```
+
 ## Google Sheets
 
 Pestañas existentes:
