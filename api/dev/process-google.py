@@ -278,8 +278,9 @@ def process_drive_image(drive, sheets, image_file):
 
     if result.get("estado") in {"OK", "REVISAR"}:
         envelope, bitacora_event = save_guia_envelope(result, source)
-        sheet_row = append_sheet_row(sheets, result)
-        sheet_written = True
+        if not envelope.get("duplicate"):
+            sheet_row = append_sheet_row(sheets, result)
+            sheet_written = True
 
     return {
         "ok": True,
