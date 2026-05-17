@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import tempfile
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from io import BytesIO
@@ -26,6 +28,100 @@ def response_json(start_response, status_code, payload):
     ]
     start_response(status, headers)
     return [body]
+
+
+def normalize_numero_guia(value):
+    return re.sub(r"[^0-9A-Za-z_-]", "", str(value or "").strip())
+
+
+def redis_command(command):
+    url = os.environ.get("UPSTASH_REDIS_REST_URL")
+    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+
+    if not url or not token:
+        raise ValueError("Missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN")
+
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(command).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        return payload.get("result")
+
+
+def redis_get(key):
+    return redis_command(["GET", key])
+
+
+def redis_set(key, value):
+    return redis_command(["SET", key, json.dumps(value, ensure_ascii=False)])
+
+
+def redis_lpush(key, value):
+    return redis_command(["LPUSH", key, json.dumps(value, ensure_ascii=False)])
+
+
+def find_storage_key(numero_guia):
+    base_key = f"helice:guia:numero:{numero_guia}"
+
+    if redis_get(base_key) is None:
+        return base_key, False, None
+
+    first_duplicate_key = f"{base_key}_resp"
+
+    if redis_get(first_duplicate_key) is None:
+        return first_duplicate_key, True, base_key
+
+    index = 2
+    while True:
+        candidate = f"{base_key}_resp_{index}"
+        if redis_get(candidate) is None:
+            return candidate, True, base_key
+        index += 1
+
+
+def save_guia_envelope(result, source):
+    numero_guia = normalize_numero_guia(result.get("data", {}).get("numero_guia", ""))
+
+    if not numero_guia:
+        raise ValueError("Missing numero_guia")
+
+    storage_key, duplicate, duplicate_of = find_storage_key(numero_guia)
+    saved_at = now_iso()
+
+    envelope = {
+        "numero_guia": numero_guia,
+        "storage_key": storage_key,
+        "duplicate": duplicate,
+        "duplicate_of": duplicate_of,
+        "saved_at": saved_at,
+        "source": source,
+        "result": result,
+    }
+
+    redis_set(storage_key, envelope)
+
+    bitacora_event = {
+        "event": "guia_processed",
+        "numero_guia": numero_guia,
+        "storage_key": storage_key,
+        "duplicate": duplicate,
+        "duplicate_of": duplicate_of,
+        "estado": result.get("estado"),
+        "saved_at": saved_at,
+        "source": source,
+    }
+
+    redis_lpush("helice:bitacora", bitacora_event)
+
+    return envelope, bitacora_event
 
 
 def get_google_services():
@@ -205,8 +301,18 @@ def app(environ, start_response):
 
         sheet_row = None
         sheet_written = False
+        envelope = None
+        bitacora_event = None
 
         if result.get("estado") in {"OK", "REVISAR"}:
+            source = {
+                "drive_file_id": first_image["id"],
+                "filename": first_image["name"],
+                "mimeType": first_image["mimeType"],
+                "sizeBytes": len(binary),
+            }
+
+            envelope, bitacora_event = save_guia_envelope(result, source)
             sheet_row = append_sheet_row(sheets, result)
             sheet_written = True
 
@@ -223,6 +329,10 @@ def app(environ, start_response):
             },
             "sheetWritten": sheet_written,
             "sheetRow": sheet_row,
+            "upstashSaved": envelope is not None,
+            "duplicate": envelope.get("duplicate") if envelope else False,
+            "storageKey": envelope.get("storage_key") if envelope else None,
+            "bitacoraEvent": bitacora_event,
             "extracted": extracted,
             "validation": validation,
             "review": review,
