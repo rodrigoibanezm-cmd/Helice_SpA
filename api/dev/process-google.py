@@ -310,6 +310,19 @@ def process_drive_image(drive, sheets, image_file):
     }
 
 
+def build_move_plan(image_files, processed_folder_id):
+    return [
+        {
+            "fileId": file.get("id"),
+            "name": file.get("name"),
+            "mimeType": file.get("mimeType"),
+            "target": "processed",
+            "targetFolderId": processed_folder_id,
+        }
+        for file in image_files
+    ]
+
+
 def app(environ, start_response):
     try:
         folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
@@ -336,6 +349,28 @@ def app(environ, start_response):
                 "totalFiles": len(files),
                 "totalImages": len(image_files),
                 "files": image_files,
+            })
+
+        if mode == "move-dry-run":
+            processed_folder_id = os.environ.get("GOOGLE_DRIVE_PROCESSED_FOLDER_ID")
+            if not processed_folder_id:
+                return response_json(start_response, 500, {
+                    "ok": False,
+                    "runtime": "python",
+                    "mode": "move-dry-run",
+                    "error": "Missing GOOGLE_DRIVE_PROCESSED_FOLDER_ID",
+                })
+
+            move_plan = build_move_plan(image_files, processed_folder_id)
+
+            return response_json(start_response, 200, {
+                "ok": True,
+                "runtime": "python",
+                "mode": "move-dry-run",
+                "folderId": folder_id,
+                "totalImages": len(image_files),
+                "plannedMoves": len(move_plan),
+                "movePlan": move_plan,
             })
 
         if not os.environ.get("OPENAI_API_KEY"):
