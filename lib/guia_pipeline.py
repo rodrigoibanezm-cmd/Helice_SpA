@@ -11,6 +11,10 @@ from googleapiclient.discovery import build
 from guia_ai import extract_data, validate_data, review_data
 from guia_schema import normalize_result, VALID_STATES
 
+CAPTURA_SHEET = "CAPTURA_ACTUAL"
+HISTORICO_SHEET = "HISTORICO"
+SHEET_RANGE = "A:K"
+
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -178,21 +182,39 @@ def build_sheet_row(result):
     ]
 
 
-def append_sheet_row(result):
+def write_sheet_row(result):
     spreadsheet_id = os.environ.get("GOOGLE_SHEET_ID")
     if not spreadsheet_id:
         raise ValueError("Missing GOOGLE_SHEET_ID")
 
     row = build_sheet_row(result)
     sheets = get_sheets_service()
+
+    sheets.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=f"{CAPTURA_SHEET}!{SHEET_RANGE}",
+        body={},
+    ).execute()
+
+    sheets.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"{CAPTURA_SHEET}!A1:K1",
+        valueInputOption="RAW",
+        body={"values": [row]},
+    ).execute()
+
     sheets.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
-        range="A:K",
+        range=f"{HISTORICO_SHEET}!{SHEET_RANGE}",
         valueInputOption="RAW",
         insertDataOption="INSERT_ROWS",
         body={"values": [row]},
     ).execute()
+
     return row
+
+
+append_sheet_row = write_sheet_row
 
 
 def process_image(image_path):
