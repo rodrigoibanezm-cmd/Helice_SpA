@@ -33,6 +33,20 @@ def error_payload(error):
     }
 
 
+def build_ai_audit(review):
+    steps = ["extract", "validate"]
+    review_applied = review is not None
+
+    if review_applied:
+        steps.append("review")
+
+    return {
+        "steps": steps,
+        "stepsCount": len(steps),
+        "reviewApplied": review_applied,
+    }
+
+
 def read_json_body(environ):
     try:
         length = int(environ.get("CONTENT_LENGTH") or 0)
@@ -117,6 +131,7 @@ def process_uploaded_binary(filename, mime_type, binary, blob):
         tmp_path.unlink(missing_ok=True)
 
     result["archivo"] = filename
+    result["ai_audit"] = build_ai_audit(review)
 
     source = {
         "type": "blob_upload",
@@ -146,6 +161,7 @@ def process_uploaded_binary(filename, mime_type, binary, blob):
         "duplicate": envelope.get("duplicate") if envelope else False,
         "storageKey": envelope.get("storage_key") if envelope else None,
         "bitacoraEvent": bitacora_event,
+        "aiAudit": result["ai_audit"],
         "extracted": extracted,
         "validation": validation,
         "review": review,
@@ -197,6 +213,7 @@ def app(environ, start_response):
             "duplicate": item.get("duplicate", False),
             "sheetWritten": item.get("sheetWritten", False),
             "storageKey": item.get("storageKey"),
+            "aiAudit": item.get("aiAudit"),
             "blobUrl": blob.get("url"),
             "blobPathname": blob.get("pathname"),
         })
