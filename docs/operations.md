@@ -4,40 +4,33 @@
 
 Existen dos flujos válidos.
 
-### A. Batch Drive
+---
 
-```txt
-1. operador sube imágenes a carpeta pendientes
-2. endpoint process-google.py procesa todas las imágenes secuencialmente
-3. Upstash guarda respaldo estructurado por guía
-4. Google Sheets recibe solo guías nuevas
-5. operador mueve pendientes procesadas a carpeta procesadas
-6. operador revisa resultado
-```
+## A. Upload unitario principal (Lovable/front)
 
-### B. Upload unitario (Lovable/front)
+Flujo oficial MVP.
 
 ```txt
 1. front envía imagen base64
 2. upload-and-process.py valida token
-3. sube la imagen a Drive / pendientes
-4. procesa SOLO ese file_id
-5. Upstash guarda respaldo estructurado
-6. Google Sheets escribe si no es duplicado
-7. mueve a procesadas o errores
-8. devuelve resultado corto al front
+3. backend guarda foto original en Vercel Blob
+4. backend crea archivo temporal
+5. OpenAI Vision procesa imagen
+6. normalización
+7. Upstash guarda envelope por numero_guia
+8. Google Sheets escribe si no es duplicado
+9. backend devuelve resultado corto al front
 ```
 
-## Endpoint batch
+Estado validado:
 
 ```txt
-GET /api/dev/process-google.py
-```
-
-Wrapper legacy de:
-
-```txt
-api/dev/process_google.py
+- upload unitario funciona end-to-end
+- Vercel Blob guarda evidencia original
+- OpenAI extracción OK
+- OpenAI validación OK
+- Upstash detecta duplicados
+- Google Sheets escribe correctamente
 ```
 
 ## Endpoint upload unitario
@@ -63,83 +56,111 @@ image/jpeg
 image/png
 ```
 
-## Modo seguro sin OpenAI
+Respuesta esperada:
 
-Para listar pendientes sin gastar tokens ni tocar Sheets/Upstash:
+```json
+{
+  "ok": true,
+  "estado": "OK",
+  "numeroGuia": "164468",
+  "duplicate": false,
+  "sheetWritten": true,
+  "storageKey": "helice:guia:numero:164468",
+  "blobUrl": "https://...",
+  "blobPathname": "guias/...jpg"
+}
+```
+
+---
+
+## B. Batch Drive legacy
+
+Flujo histórico/manual.
+
+```txt
+1. operador sube imágenes a Drive / pendientes
+2. process-google.py procesa batch
+3. Upstash guarda respaldo
+4. Google Sheets recibe solo guías nuevas
+5. operador mueve pendientes procesadas
+```
+
+## Endpoint batch
+
+```txt
+GET /api/dev/process-google.py
+```
+
+Wrapper legacy de:
+
+```txt
+api/dev/process_google.py
+```
+
+Modos disponibles:
+
+```txt
+mode=list
+mode=process
+mode=move-dry-run
+mode=move
+```
+
+## Modo seguro sin OpenAI
 
 ```txt
 GET /api/dev/process-google.py?mode=list
 ```
 
-Este modo solo hace:
+Solo:
 
 ```txt
-- lista archivos de Drive
+- lista archivos Drive
 - filtra imágenes
-- devuelve totalFiles, totalImages y files[]
+- devuelve metadata
 ```
 
 No hace:
 
 ```txt
-- descarga de imágenes
 - OpenAI
-- escritura Sheets
-- escritura Upstash
+- Sheets
+- Upstash
 ```
 
-## Movimiento de archivos Drive
+---
 
-Carpetas:
+## Vercel Blob
+
+Uso:
 
 ```txt
-GOOGLE_DRIVE_FOLDER_ID = pendientes
-GOOGLE_DRIVE_PROCESSED_FOLDER_ID = procesadas
-GOOGLE_DRIVE_ERROR_FOLDER_ID = errores
+- conservar foto original subida desde front
+- evidencia técnica
+- auditoría
 ```
 
-### Dry-run
+Variable:
 
 ```txt
-GET /api/dev/process-google.py?mode=move-dry-run
-```
-
-### Move real batch
-
-```txt
-GET /api/dev/process-google.py?mode=move
-```
-
-### Movimiento upload unitario
-
-```txt
-upload-and-process.py mueve solo el file_id recién creado.
-No lista pendientes.
-No toca otras imágenes.
+BLOB_READ_WRITE_TOKEN
 ```
 
 ## Google Sheets
 
-Pestañas existentes:
+Pestañas:
 
 ```txt
 CAPTURA_ACTUAL
 HISTORICO
 ```
 
-Estado actual validado:
+Reglas:
 
 ```txt
-- Sheets recibe fila A:K solo si la guía no es duplicada
-- duplicados NO se escriben en Sheets
-- duplicados sí se guardan en Upstash
-```
-
-Objetivo operativo:
-
-```txt
-Sheets = operación limpia
-Upstash = histórico técnico / auditoría
+- Sheets solo recibe guías nuevas
+- duplicate=true → no escribe
+- duplicate=false → escribe fila
 ```
 
 ## Upstash Redis
@@ -150,7 +171,7 @@ Namespace:
 helice:
 ```
 
-Variables usadas:
+Variables:
 
 ```txt
 KV_REST_API_URL
@@ -171,7 +192,7 @@ Primera vez:
 helice:guia:numero:{numero_guia}
 ```
 
-Duplicado:
+Duplicados:
 
 ```txt
 helice:guia:numero:{numero_guia}_resp
@@ -179,39 +200,14 @@ helice:guia:numero:{numero_guia}_resp_2
 helice:guia:numero:{numero_guia}_resp_3
 ```
 
-Regla MVP:
+## Regla MVP
 
 ```txt
-- no se bloquean duplicados
-- se guardan con sufijo en Upstash
-- no se escriben en Sheets
-- se registra bitácora
+- duplicados sí se guardan en Upstash
+- duplicados NO se escriben en Sheets
+- Blob guarda evidencia original
+- Upstash es la memoria de duplicados
 ```
-
-## Batch
-
-El endpoint batch procesa todas las imágenes encontradas en pendientes.
-
-Reglas:
-
-```txt
-- procesamiento secuencial
-- si una imagen falla, no cae todo el batch
-- errors cuenta fallas aisladas
-- processed cuenta imágenes procesadas exitosamente
-- written cuenta filas efectivamente escritas en Sheets
-- duplicates cuenta guías repetidas detectadas por numero_guia
-```
-
-## Bitácora
-
-Bitácora append-only:
-
-```txt
-helice:bitacora
-```
-
-Se escribe con LPUSH.
 
 ## Runtime validado
 
