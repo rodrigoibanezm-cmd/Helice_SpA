@@ -5,6 +5,7 @@ import os
 from io import BytesIO
 from pathlib import Path
 
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload
 
 
@@ -28,6 +29,34 @@ ALLOWED_MIME_TYPES = frozenset({
     "image/jpeg",
     "image/png",
 })
+
+
+def error_payload(error):
+    payload = {
+        "type": error.__class__.__name__,
+        "message": str(error) or repr(error),
+    }
+
+    if isinstance(error, HttpError):
+        payload["status"] = getattr(error.resp, "status", None)
+        payload["reason"] = getattr(error.resp, "reason", None)
+
+        try:
+            content = error.content.decode("utf-8")
+            payload["content"] = content
+
+            parsed = json.loads(content)
+            details = parsed.get("error", {})
+            payload["googleError"] = {
+                "code": details.get("code"),
+                "message": details.get("message"),
+                "status": details.get("status"),
+                "reason": details.get("errors", [{}])[0].get("reason") if details.get("errors") else None,
+            }
+        except Exception:
+            pass
+
+    return payload
 
 
 def read_json_body(environ):
@@ -188,7 +217,7 @@ def app(environ, start_response):
 
         return response_json(start_response, 500, {
             "ok": False,
-            "error": str(error),
+            "error": error_payload(error),
             "movedTo": moved_to,
             "driveFile": {
                 "id": drive_file.get("id"),
