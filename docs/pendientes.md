@@ -1,12 +1,13 @@
 # Pendientes
 
-## Pendientes aprobados
+## Pendientes reales
 
 ```txt
-- procesar N imágenes
-- escribir CAPTURA_ACTUAL + HISTORICO
-- evitar duplicados por numero_guia
-- mover OK a /procesados
-- mover ERROR a /errores
-- endpoint final fuera de /dev
+- mover automáticamente a /procesadas después de process
+- mover automáticamente a /errores si falla una imagen
+- sacar endpoint final fuera de /dev
+- limpiar endpoint JS legacy si todavía existe
+- mejorar limpieza de destinos si sigue apareciendo basura
+- documentar flujo correo -> Drive -> proceso
+- definir intake final (correo, front web o WhatsApp)
 ```
