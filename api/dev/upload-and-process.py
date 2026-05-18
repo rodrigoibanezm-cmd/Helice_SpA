@@ -1,29 +1,24 @@
 import base64
-import importlib.util
 import json
 import os
+import sys
 import tempfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-def load_process_google():
-    module_path = Path(__file__).resolve().with_name("process_google.py")
-    spec = importlib.util.spec_from_file_location("process_google", module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-process_google = load_process_google()
-
-append_sheet_row = process_google.append_sheet_row
-get_google_services = process_google.get_google_services
-get_query_params = process_google.get_query_params
-process_image = process_google.process_image
-response_json = process_google.response_json
-save_guia_envelope = process_google.save_guia_envelope
+from lib.guia_pipeline import (  # noqa: E402
+    append_sheet_row,
+    get_query_params,
+    now_iso,
+    process_image,
+    response_json,
+    save_guia_envelope,
+)
 
 ALLOWED_MIME_TYPES = frozenset({
     "image/jpeg",
@@ -79,7 +74,7 @@ def safe_filename(filename):
 
 
 def blob_path(filename):
-    return f"guias/{process_google.now_iso().replace(':', '-')}__{safe_filename(filename)}"
+    return f"guias/{now_iso().replace(':', '-')}__{safe_filename(filename)}"
 
 
 def upload_blob(filename, mime_type, binary):
@@ -139,8 +134,7 @@ def process_uploaded_binary(filename, mime_type, binary, blob):
     if result.get("estado") in {"OK", "REVISAR"}:
         envelope, bitacora_event = save_guia_envelope(result, source)
         if not envelope.get("duplicate"):
-            _, sheets = get_google_services()
-            sheet_row = append_sheet_row(sheets, result)
+            sheet_row = append_sheet_row(result)
             sheet_written = True
 
     return {
