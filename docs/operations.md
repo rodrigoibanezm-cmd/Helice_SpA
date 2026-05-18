@@ -7,7 +7,8 @@
 2. endpoint process-google.py procesa todas las imágenes secuencialmente
 3. Upstash guarda respaldo estructurado por guía
 4. Google Sheets recibe solo guías nuevas
-5. operador revisa resultado
+5. operador mueve pendientes procesadas a carpeta procesadas
+6. operador revisa resultado
 ```
 
 ## Endpoint operativo
@@ -52,6 +53,76 @@ files:
 - guia1.jpeg
 - guia_01.jpg
 - guia_02.jpg
+```
+
+## Movimiento de archivos Drive
+
+Carpetas:
+
+```txt
+GOOGLE_DRIVE_FOLDER_ID = pendientes
+GOOGLE_DRIVE_PROCESSED_FOLDER_ID = procesadas
+GOOGLE_DRIVE_ERROR_FOLDER_ID = errores
+```
+
+### Dry-run
+
+Para ver qué movería sin mover archivos:
+
+```txt
+GET /api/dev/process-google.py?mode=move-dry-run
+```
+
+No hace:
+
+```txt
+- OpenAI
+- Sheets
+- Upstash
+- mover archivos
+```
+
+Prueba validada:
+
+```txt
+mode=move-dry-run
+plannedMoves=5
+
+guia_04.jpg -> processed
+guia_03.jpg -> processed
+guia1.jpeg -> processed
+guia_01.jpg -> processed
+guia_02.jpg -> processed
+```
+
+### Move real
+
+Para mover imágenes desde pendientes a procesadas:
+
+```txt
+GET /api/dev/process-google.py?mode=move
+```
+
+Prueba validada:
+
+```txt
+mode=move
+moved=5
+errors=0
+```
+
+Resultado validado en Drive:
+
+```txt
+pendientes -> vacío
+procesadas -> 5 fotos
+```
+
+Nota técnica:
+
+```txt
+Para mover archivos Drive, el scope usado es:
+https://www.googleapis.com/auth/drive
 ```
 
 ## Google Sheets
