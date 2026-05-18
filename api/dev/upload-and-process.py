@@ -11,6 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from lib.email_alerts import send_guia_processed_email  # noqa: E402
 from lib.guia_pipeline import (  # noqa: E402
     append_sheet_row,
     get_query_params,
@@ -169,12 +170,22 @@ def process_uploaded_binary(filename, mime_type, binary, blob):
     sheet_written = False
     envelope = None
     bitacora_event = None
+    email_result = None
 
     if result.get("estado") in {"OK", "REVISAR"}:
         envelope, bitacora_event = save_guia_envelope(result, source)
+
         if not envelope.get("duplicate"):
             sheet_row = append_sheet_row(result)
             sheet_written = True
+
+            if result.get("estado") == "OK":
+                email_result = send_guia_processed_email(
+                    numero_guia=result.get("data", {}).get("numero_guia", ""),
+                    estado=result.get("estado"),
+                    ai_audit=result.get("ai_audit", {}),
+                    blob_url=blob.get("url"),
+                )
 
     return {
         "ok": True,
@@ -185,6 +196,7 @@ def process_uploaded_binary(filename, mime_type, binary, blob):
         "duplicate": envelope.get("duplicate") if envelope else False,
         "storageKey": envelope.get("storage_key") if envelope else None,
         "bitacoraEvent": bitacora_event,
+        "emailResult": email_result,
         "aiAudit": result["ai_audit"],
         "extracted": extracted,
         "validation": validation,
@@ -242,6 +254,7 @@ def app(environ, start_response):
             "duplicate": item.get("duplicate", False),
             "sheetWritten": item.get("sheetWritten", False),
             "storageKey": item.get("storageKey"),
+            "emailSent": bool(item.get("emailResult", {}).get("sent")),
             "aiAudit": item.get("aiAudit"),
             "blobUrl": blob.get("url"),
             "blobPathname": blob.get("pathname"),
