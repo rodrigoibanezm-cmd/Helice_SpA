@@ -18,36 +18,27 @@ Google Sheets recibe filas A:K solo para guías nuevas.
 
 ## Estado operativo actual
 
-Flujo validado:
+Existen dos formas operativas:
 
 ```txt
-Google Drive / pendientes
-→ batch secuencial de imágenes
-→ extracción OpenAI Vision
-→ validación
-→ review si corresponde
-→ normalización
-→ respaldo Upstash
-→ escritura Sheets si no es duplicado
-→ movimiento Drive a procesadas
+1. Batch Drive
+   Procesa todas las imágenes existentes en Google Drive / pendientes.
+
+2. Upload unitario
+   Recibe una imagen desde front/Lovable, la sube a Drive / pendientes,
+   procesa ese mismo file_id y la mueve a procesadas o errores.
 ```
 
-Estado validado:
-
-```txt
-- procesa N imágenes
-- no cae el batch completo si una imagen falla
-- detecta duplicados por numero_guia
-- duplicados no se escriben en Sheets
-- duplicados sí se guardan en Upstash con sufijo _resp
-- bitácora append-only en Upstash
-- mueve archivos de pendientes a procesadas
-```
-
-## Endpoint operativo actual
+## Endpoint batch
 
 ```txt
 GET /api/dev/process-google.py
+```
+
+Wrapper legacy de:
+
+```txt
+api/dev/process_google.py
 ```
 
 Modos disponibles:
@@ -57,6 +48,56 @@ mode=list          -> lista pendientes sin OpenAI
 mode=process       -> procesa batch completo
 mode=move-dry-run  -> muestra qué movería sin mover
 mode=move          -> mueve pendientes a procesadas
+```
+
+## Endpoint unitario para front
+
+```txt
+POST /api/dev/upload-and-process.py?token=...
+```
+
+Body esperado:
+
+```json
+{
+  "filename": "guia.jpg",
+  "mimeType": "image/jpeg",
+  "imageBase64": "..."
+}
+```
+
+Mime types permitidos:
+
+```txt
+image/jpeg
+image/png
+```
+
+Respuesta corta esperada:
+
+```json
+{
+  "ok": true,
+  "estado": "OK",
+  "numeroGuia": "492060",
+  "duplicate": false,
+  "sheetWritten": true,
+  "storageKey": "helice:guia:numero:492060",
+  "movedTo": "processed"
+}
+```
+
+## Reglas actuales
+
+```txt
+- procesa N imágenes en batch
+- procesa 1 imagen por request en upload unitario
+- no cae el batch completo si una imagen falla
+- detecta duplicados por numero_guia
+- duplicados no se escriben en Sheets
+- duplicados sí se guardan en Upstash con sufijo _resp
+- bitácora append-only en Upstash
+- upload unitario mueve solo el file_id recién creado
 ```
 
 ## Formato aprobado de Google Sheets
@@ -103,6 +144,7 @@ GOOGLE_DRIVE_PROCESSED_FOLDER_ID
 GOOGLE_DRIVE_ERROR_FOLDER_ID
 KV_REST_API_URL
 KV_REST_API_TOKEN
+UPLOAD_PROCESS_TOKEN
 ```
 
 ## Runtime
