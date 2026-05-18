@@ -1,17 +1,28 @@
 import base64
+import importlib.util
 import json
 import os
 from io import BytesIO
+from pathlib import Path
 
 from googleapiclient.http import MediaIoBaseUpload
 
-from process_google import (
-    get_google_services,
-    get_query_params,
-    move_drive_file,
-    process_drive_image,
-    response_json,
-)
+
+def load_process_google():
+    module_path = Path(__file__).resolve().with_name("process_google.py")
+    spec = importlib.util.spec_from_file_location("process_google", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+process_google = load_process_google()
+
+get_google_services = process_google.get_google_services
+get_query_params = process_google.get_query_params
+move_drive_file = process_google.move_drive_file
+process_drive_image = process_google.process_drive_image
+response_json = process_google.response_json
 
 ALLOWED_MIME_TYPES = frozenset({
     "image/jpeg",
