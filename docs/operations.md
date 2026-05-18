@@ -1,6 +1,10 @@
 # Operations
 
-## Flujo operativo actual
+## Flujos operativos actuales
+
+Existen dos flujos válidos.
+
+### A. Batch Drive
 
 ```txt
 1. operador sube imágenes a carpeta pendientes
@@ -11,10 +15,52 @@
 6. operador revisa resultado
 ```
 
-## Endpoint operativo
+### B. Upload unitario (Lovable/front)
+
+```txt
+1. front envía imagen base64
+2. upload-and-process.py valida token
+3. sube la imagen a Drive / pendientes
+4. procesa SOLO ese file_id
+5. Upstash guarda respaldo estructurado
+6. Google Sheets escribe si no es duplicado
+7. mueve a procesadas o errores
+8. devuelve resultado corto al front
+```
+
+## Endpoint batch
 
 ```txt
 GET /api/dev/process-google.py
+```
+
+Wrapper legacy de:
+
+```txt
+api/dev/process_google.py
+```
+
+## Endpoint upload unitario
+
+```txt
+POST /api/dev/upload-and-process.py?token=...
+```
+
+Body esperado:
+
+```json
+{
+  "filename": "guia.jpg",
+  "mimeType": "image/jpeg",
+  "imageBase64": "..."
+}
+```
+
+Mime types permitidos:
+
+```txt
+image/jpeg
+image/png
 ```
 
 ## Modo seguro sin OpenAI
@@ -42,19 +88,6 @@ No hace:
 - escritura Upstash
 ```
 
-Prueba validada:
-
-```txt
-mode=list
-totalImages=5
-files:
-- guia_04.jpg
-- guia_03.jpg
-- guia1.jpeg
-- guia_01.jpg
-- guia_02.jpg
-```
-
 ## Movimiento de archivos Drive
 
 Carpetas:
@@ -67,62 +100,22 @@ GOOGLE_DRIVE_ERROR_FOLDER_ID = errores
 
 ### Dry-run
 
-Para ver qué movería sin mover archivos:
-
 ```txt
 GET /api/dev/process-google.py?mode=move-dry-run
 ```
 
-No hace:
-
-```txt
-- OpenAI
-- Sheets
-- Upstash
-- mover archivos
-```
-
-Prueba validada:
-
-```txt
-mode=move-dry-run
-plannedMoves=5
-
-guia_04.jpg -> processed
-guia_03.jpg -> processed
-guia1.jpeg -> processed
-guia_01.jpg -> processed
-guia_02.jpg -> processed
-```
-
-### Move real
-
-Para mover imágenes desde pendientes a procesadas:
+### Move real batch
 
 ```txt
 GET /api/dev/process-google.py?mode=move
 ```
 
-Prueba validada:
+### Movimiento upload unitario
 
 ```txt
-mode=move
-moved=5
-errors=0
-```
-
-Resultado validado en Drive:
-
-```txt
-pendientes -> vacío
-procesadas -> 5 fotos
-```
-
-Nota técnica:
-
-```txt
-Para mover archivos Drive, el scope usado es:
-https://www.googleapis.com/auth/drive
+upload-and-process.py mueve solo el file_id recién creado.
+No lista pendientes.
+No toca otras imágenes.
 ```
 
 ## Google Sheets
@@ -151,7 +144,7 @@ Upstash = histórico técnico / auditoría
 
 ## Upstash Redis
 
-Se usa una Redis existente con namespace:
+Namespace:
 
 ```txt
 helice:
@@ -197,7 +190,7 @@ Regla MVP:
 
 ## Batch
 
-El endpoint procesa todas las imágenes encontradas en pendientes.
+El endpoint batch procesa todas las imágenes encontradas en pendientes.
 
 Reglas:
 
@@ -219,36 +212,6 @@ helice:bitacora
 ```
 
 Se escribe con LPUSH.
-
-## Pruebas validadas
-
-Primera corrida individual:
-
-```txt
-duplicate=False
-storageKey=helice:guia:numero:492060
-upstashSaved=True
-sheetWritten=True
-```
-
-Segunda corrida individual:
-
-```txt
-duplicate=True
-storageKey=helice:guia:numero:492060_resp
-upstashSaved=True
-sheetWritten=False
-```
-
-Batch duplicado limpio:
-
-```txt
-totalImages=5
-processed=5
-written=0
-duplicates=5
-errors=0
-```
 
 ## Runtime validado
 
