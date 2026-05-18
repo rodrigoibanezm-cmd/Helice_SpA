@@ -19,7 +19,8 @@ Flujo oficial MVP.
 6. normalización
 7. Upstash guarda envelope por numero_guia
 8. Google Sheets escribe si no es duplicado
-9. backend devuelve resultado corto al front
+9. SendGrid envía alerta desde backend
+10. backend devuelve resultado corto al front
 ```
 
 Estado validado:
@@ -31,6 +32,7 @@ Estado validado:
 - OpenAI validación OK
 - Upstash detecta duplicados
 - Google Sheets escribe correctamente
+- SendGrid envía alertas correctamente
 ```
 
 ## Endpoint upload unitario
@@ -66,9 +68,46 @@ Respuesta esperada:
   "duplicate": false,
   "sheetWritten": true,
   "storageKey": "helice:guia:numero:164468",
+  "emailSent": true,
+  "emailError": null,
   "blobUrl": "https://...",
   "blobPathname": "guias/...jpg"
 }
+```
+
+## Política de alertas mail
+
+Proveedor:
+
+```txt
+SendGrid
+```
+
+Variables:
+
+```txt
+SENDGRID_API_KEY
+SENDGRID_FROM_EMAIL
+SENDGRID_FROM_NAME
+NOTIFY_TO_EMAIL
+```
+
+Reglas:
+
+```txt
+- el front nunca define destinatarios
+- el backend lee NOTIFY_TO_EMAIL
+- mail sale solo desde backend
+- mail solo para guías nuevas OK escritas en Sheets
+```
+
+No envía mail si:
+
+```txt
+- duplicate=true
+- estado=REVISAR
+- estado=ERROR
+- sheetWritten=false
 ```
 
 ---
