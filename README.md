@@ -2,15 +2,16 @@
 
 MVP de captura y procesamiento de guías de despacho para Helice SpA.
 
-El sistema toma imágenes de guías desde Google Drive, extrae datos con OpenAI Vision, normaliza el resultado, guarda respaldo estructurado en Upstash Redis y escribe filas limpias en Google Sheets según el formato solicitado por el cliente.
+El sistema recibe imágenes de guías, extrae datos con OpenAI Vision, normaliza el resultado, guarda respaldo estructurado en Upstash Redis, conserva la foto original en Vercel Blob y escribe filas limpias en Google Sheets según el formato solicitado por el cliente.
 
 Este README es solo el mapa ejecutivo. La verdad técnica vive en `docs/`.
 
 ## Principio central
 
 ```txt
-Drive recibe imágenes.
-Python procesa guías.
+Front/Lovable recibe imagen.
+Vercel Blob guarda la foto original.
+Python procesa la guía.
 OpenAI extrae y valida.
 Upstash guarda respaldo y bitácora.
 Google Sheets recibe filas A:K solo para guías nuevas.
@@ -18,39 +19,34 @@ Google Sheets recibe filas A:K solo para guías nuevas.
 
 ## Estado operativo actual
 
-Existen dos formas operativas:
+Flujo principal validado:
 
 ```txt
-1. Batch Drive
-   Procesa todas las imágenes existentes en Google Drive / pendientes.
-
-2. Upload unitario
-   Recibe una imagen desde front/Lovable, la sube a Drive / pendientes,
-   procesa ese mismo file_id y la mueve a procesadas o errores.
+Lovable / PowerShell
+→ POST upload-and-process.py
+→ imagen base64
+→ Vercel Blob guarda foto original
+→ backend procesa archivo temporal
+→ OpenAI Vision extrae y valida
+→ normalización
+→ Upstash guarda envelope por numero_guia
+→ Google Sheets escribe si no es duplicado
+→ respuesta corta al front
 ```
 
-## Endpoint batch
+Estado validado:
 
 ```txt
-GET /api/dev/process-google.py
+- procesa 1 imagen por request
+- guarda foto original en Vercel Blob
+- detecta duplicados por numero_guia
+- duplicados no se escriben en Sheets
+- duplicados sí se guardan en Upstash con sufijo _resp
+- guía nueva se escribe correctamente en Google Sheets
+- bitácora append-only en Upstash
 ```
 
-Wrapper legacy de:
-
-```txt
-api/dev/process_google.py
-```
-
-Modos disponibles:
-
-```txt
-mode=list          -> lista pendientes sin OpenAI
-mode=process       -> procesa batch completo
-mode=move-dry-run  -> muestra qué movería sin mover
-mode=move          -> mueve pendientes a procesadas
-```
-
-## Endpoint unitario para front
+## Endpoint principal para front
 
 ```txt
 POST /api/dev/upload-and-process.py?token=...
@@ -79,25 +75,53 @@ Respuesta corta esperada:
 {
   "ok": true,
   "estado": "OK",
-  "numeroGuia": "492060",
+  "numeroGuia": "164468",
   "duplicate": false,
   "sheetWritten": true,
-  "storageKey": "helice:guia:numero:492060",
-  "movedTo": "processed"
+  "storageKey": "helice:guia:numero:164468",
+  "blobUrl": "https://...",
+  "blobPathname": "guias/...jpg"
 }
+```
+
+## Endpoint batch legacy
+
+```txt
+GET /api/dev/process-google.py
+```
+
+Wrapper legacy de:
+
+```txt
+api/dev/process_google.py
+```
+
+Uso actual:
+
+```txt
+- flujo Drive antiguo/manual
+- pruebas batch
+- respaldo operativo si se suben imágenes manualmente a Drive / pendientes
+```
+
+Modos disponibles:
+
+```txt
+mode=list          -> lista pendientes sin OpenAI
+mode=process       -> procesa batch completo
+mode=move-dry-run  -> muestra qué movería sin mover
+mode=move          -> mueve pendientes a procesadas
 ```
 
 ## Reglas actuales
 
 ```txt
-- procesa N imágenes en batch
-- procesa 1 imagen por request en upload unitario
-- no cae el batch completo si una imagen falla
-- detecta duplicados por numero_guia
+- upload unitario no usa Drive
+- Drive queda solo para batch legacy
+- Vercel Blob conserva evidencia original
+- Upstash decide duplicados por numero_guia
+- Google Sheets solo recibe guías nuevas
 - duplicados no se escriben en Sheets
-- duplicados sí se guardan en Upstash con sufijo _resp
-- bitácora append-only en Upstash
-- upload unitario mueve solo el file_id recién creado
 ```
 
 ## Formato aprobado de Google Sheets
@@ -124,27 +148,27 @@ Destino se arma como:
 destino_empresa - destino_direccion - destino_comuna
 ```
 
-## Carpetas Drive
-
-```txt
-GOOGLE_DRIVE_FOLDER_ID = pendientes
-GOOGLE_DRIVE_PROCESSED_FOLDER_ID = procesadas
-GOOGLE_DRIVE_ERROR_FOLDER_ID = errores
-```
-
 ## Variables de entorno aprobadas
+
+Flujo principal:
 
 ```txt
 OPENAI_API_KEY
 GOOGLE_CLIENT_EMAIL
 GOOGLE_PRIVATE_KEY
 GOOGLE_SHEET_ID
-GOOGLE_DRIVE_FOLDER_ID
-GOOGLE_DRIVE_PROCESSED_FOLDER_ID
-GOOGLE_DRIVE_ERROR_FOLDER_ID
 KV_REST_API_URL
 KV_REST_API_TOKEN
 UPLOAD_PROCESS_TOKEN
+BLOB_READ_WRITE_TOKEN
+```
+
+Flujo batch legacy Drive:
+
+```txt
+GOOGLE_DRIVE_FOLDER_ID
+GOOGLE_DRIVE_PROCESSED_FOLDER_ID
+GOOGLE_DRIVE_ERROR_FOLDER_ID
 ```
 
 ## Runtime
