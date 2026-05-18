@@ -2,7 +2,7 @@
 
 MVP de captura y procesamiento de guías de despacho para Helice SpA.
 
-El sistema toma imágenes de guías desde Google Drive, extrae datos con OpenAI Vision, normaliza el resultado y escribe una fila en Google Sheets según el formato solicitado por el cliente.
+El sistema toma imágenes de guías desde Google Drive, extrae datos con OpenAI Vision, normaliza el resultado, guarda respaldo estructurado en Upstash Redis y escribe filas limpias en Google Sheets según el formato solicitado por el cliente.
 
 Este README es solo el mapa ejecutivo. La verdad técnica vive en `docs/`.
 
@@ -12,24 +12,37 @@ Este README es solo el mapa ejecutivo. La verdad técnica vive en `docs/`.
 Drive recibe imágenes.
 Python procesa guías.
 OpenAI extrae y valida.
-Google Sheets recibe filas A:K.
+Upstash guarda respaldo y bitácora.
+Google Sheets recibe filas A:K solo para guías nuevas.
 ```
 
 ## Estado operativo actual
 
-El flujo validado actualmente es:
+Flujo validado:
 
 ```txt
 Google Drive / pendientes
-→ descarga primera imagen
+→ batch secuencial de imágenes
 → extracción OpenAI Vision
 → validación
 → review si corresponde
 → normalización
-→ escritura en Google Sheets
+→ respaldo Upstash
+→ escritura Sheets si no es duplicado
+→ movimiento Drive a procesadas
 ```
 
-Está probado end-to-end con una guía DERCO.
+Estado validado:
+
+```txt
+- procesa N imágenes
+- no cae el batch completo si una imagen falla
+- detecta duplicados por numero_guia
+- duplicados no se escriben en Sheets
+- duplicados sí se guardan en Upstash con sufijo _resp
+- bitácora append-only en Upstash
+- mueve archivos de pendientes a procesadas
+```
 
 ## Endpoint operativo actual
 
@@ -37,14 +50,13 @@ Está probado end-to-end con una guía DERCO.
 GET /api/dev/process-google.py
 ```
 
-Este endpoint:
+Modos disponibles:
 
 ```txt
-- lee GOOGLE_DRIVE_FOLDER_ID
-- descarga una imagen desde Drive
-- procesa la guía
-- escribe una fila en Google Sheets
-- devuelve JSON de auditoría
+mode=list          -> lista pendientes sin OpenAI
+mode=process       -> procesa batch completo
+mode=move-dry-run  -> muestra qué movería sin mover
+mode=move          -> mueve pendientes a procesadas
 ```
 
 ## Formato aprobado de Google Sheets
@@ -71,6 +83,14 @@ Destino se arma como:
 destino_empresa - destino_direccion - destino_comuna
 ```
 
+## Carpetas Drive
+
+```txt
+GOOGLE_DRIVE_FOLDER_ID = pendientes
+GOOGLE_DRIVE_PROCESSED_FOLDER_ID = procesadas
+GOOGLE_DRIVE_ERROR_FOLDER_ID = errores
+```
+
 ## Variables de entorno aprobadas
 
 ```txt
@@ -81,6 +101,8 @@ GOOGLE_SHEET_ID
 GOOGLE_DRIVE_FOLDER_ID
 GOOGLE_DRIVE_PROCESSED_FOLDER_ID
 GOOGLE_DRIVE_ERROR_FOLDER_ID
+KV_REST_API_URL
+KV_REST_API_TOKEN
 ```
 
 ## Runtime
