@@ -2,11 +2,10 @@ import base64
 import importlib.util
 import json
 import os
-from io import BytesIO
+import tempfile
+import urllib.parse
+import urllib.request
 from pathlib import Path
-
-from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseUpload
 
 
 def load_process_google():
@@ -19,11 +18,12 @@ def load_process_google():
 
 process_google = load_process_google()
 
+append_sheet_row = process_google.append_sheet_row
 get_google_services = process_google.get_google_services
 get_query_params = process_google.get_query_params
-move_drive_file = process_google.move_drive_file
-process_drive_image = process_google.process_drive_image
+process_image = process_google.process_image
 response_json = process_google.response_json
+save_guia_envelope = process_google.save_guia_envelope
 
 ALLOWED_MIME_TYPES = frozenset({
     "image/jpeg",
@@ -32,31 +32,10 @@ ALLOWED_MIME_TYPES = frozenset({
 
 
 def error_payload(error):
-    payload = {
+    return {
         "type": error.__class__.__name__,
         "message": str(error) or repr(error),
     }
-
-    if isinstance(error, HttpError):
-        payload["status"] = getattr(error.resp, "status", None)
-        payload["reason"] = getattr(error.resp, "reason", None)
-
-        try:
-            content = error.content.decode("utf-8")
-            payload["content"] = content
-
-            parsed = json.loads(content)
-            details = parsed.get("error", {})
-            payload["googleError"] = {
-                "code": details.get("code"),
-                "message": details.get("message"),
-                "status": details.get("status"),
-                "reason": details.get("errors", [{}])[0].get("reason") if details.get("errors") else None,
-            }
-        except Exception:
-            pass
-
-    return payload
 
 
 def read_json_body(environ):
@@ -94,31 +73,93 @@ def decode_image_base64(value):
     return base64.b64decode(clean, validate=True)
 
 
-def upload_drive_file(drive, folder_id, filename, mime_type, binary):
-    media = MediaIoBaseUpload(
-        BytesIO(binary),
-        mimetype=mime_type,
-        resumable=False,
+def safe_filename(filename):
+    clean = Path(str(filename or "guia.jpg")).name.strip()
+    return clean or "guia.jpg"
+
+
+def blob_path(filename):
+    return f"guias/{process_google.now_iso().replace(':', '-')}__{safe_filename(filename)}"
+
+
+def upload_blob(filename, mime_type, binary):
+    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
+    if not token:
+        raise ValueError("Missing BLOB_READ_WRITE_TOKEN")
+
+    path = blob_path(filename)
+    url = f"https://blob.vercel-storage.com/{urllib.parse.quote(path)}"
+
+    request = urllib.request.Request(
+        url,
+        data=binary,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": mime_type,
+            "x-add-random-suffix": "0",
+        },
+        method="PUT",
     )
 
-    metadata = {
-        "name": filename,
-        "parents": [folder_id],
+    with urllib.request.urlopen(request) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        return payload
+
+
+def process_uploaded_binary(filename, mime_type, binary, blob):
+    suffix = Path(filename).suffix.lower()
+
+    if not suffix:
+        suffix = ".jpg" if mime_type == "image/jpeg" else ".png"
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(binary)
+        tmp_path = Path(tmp.name)
+
+    try:
+        extracted, validation, review, result = process_image(tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    result["archivo"] = filename
+
+    source = {
+        "type": "blob_upload",
+        "filename": filename,
         "mimeType": mime_type,
+        "sizeBytes": len(binary),
+        "blob": blob,
     }
 
-    return drive.files().create(
-        body=metadata,
-        media_body=media,
-        fields="id,name,mimeType",
-        supportsAllDrives=True,
-    ).execute()
+    sheet_row = None
+    sheet_written = False
+    envelope = None
+    bitacora_event = None
+
+    if result.get("estado") in {"OK", "REVISAR"}:
+        envelope, bitacora_event = save_guia_envelope(result, source)
+        if not envelope.get("duplicate"):
+            _, sheets = get_google_services()
+            sheet_row = append_sheet_row(sheets, result)
+            sheet_written = True
+
+    return {
+        "ok": True,
+        "file": source,
+        "sheetWritten": sheet_written,
+        "sheetRow": sheet_row,
+        "upstashSaved": envelope is not None,
+        "duplicate": envelope.get("duplicate") if envelope else False,
+        "storageKey": envelope.get("storage_key") if envelope else None,
+        "bitacoraEvent": bitacora_event,
+        "extracted": extracted,
+        "validation": validation,
+        "review": review,
+        "result": result,
+    }
 
 
 def app(environ, start_response):
-    drive_file = None
-    pending_folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
-
     try:
         query = get_query_params(environ)
 
@@ -134,23 +175,11 @@ def app(environ, start_response):
                 "error": "method_not_allowed",
             })
 
-        if not pending_folder_id:
-            raise ValueError("Missing GOOGLE_DRIVE_FOLDER_ID")
-
-        processed_folder_id = os.environ.get("GOOGLE_DRIVE_PROCESSED_FOLDER_ID")
-        error_folder_id = os.environ.get("GOOGLE_DRIVE_ERROR_FOLDER_ID")
-
-        if not processed_folder_id:
-            raise ValueError("Missing GOOGLE_DRIVE_PROCESSED_FOLDER_ID")
-
-        if not error_folder_id:
-            raise ValueError("Missing GOOGLE_DRIVE_ERROR_FOLDER_ID")
-
         if not os.environ.get("OPENAI_API_KEY"):
             raise ValueError("Missing OPENAI_API_KEY")
 
         body = read_json_body(environ)
-        filename = str(body.get("filename") or "guia.jpg").strip()
+        filename = safe_filename(body.get("filename") or "guia.jpg")
         mime_type = str(body.get("mimeType") or "").strip().lower()
 
         if mime_type not in ALLOWED_MIME_TYPES:
@@ -161,26 +190,11 @@ def app(environ, start_response):
             })
 
         binary = decode_image_base64(body.get("imageBase64"))
-        drive, sheets = get_google_services()
+        blob = upload_blob(filename, mime_type, binary)
+        item = process_uploaded_binary(filename, mime_type, binary, blob)
 
-        drive_file = upload_drive_file(
-            drive=drive,
-            folder_id=pending_folder_id,
-            filename=filename,
-            mime_type=mime_type,
-            binary=binary,
-        )
-
-        item = process_drive_image(drive, sheets, drive_file)
         result = item.get("result", {})
         data = result.get("data", {})
-
-        move_drive_file(
-            drive,
-            drive_file["id"],
-            pending_folder_id,
-            processed_folder_id,
-        )
 
         return response_json(start_response, 200, {
             "ok": True,
@@ -189,39 +203,12 @@ def app(environ, start_response):
             "duplicate": item.get("duplicate", False),
             "sheetWritten": item.get("sheetWritten", False),
             "storageKey": item.get("storageKey"),
-            "movedTo": "processed",
-            "driveFile": {
-                "id": drive_file.get("id"),
-                "name": drive_file.get("name"),
-                "mimeType": drive_file.get("mimeType"),
-            },
+            "blobUrl": blob.get("url"),
+            "blobPathname": blob.get("pathname"),
         })
 
     except Exception as error:
-        moved_to = None
-
-        try:
-            if drive_file and pending_folder_id:
-                error_folder_id = os.environ.get("GOOGLE_DRIVE_ERROR_FOLDER_ID")
-                if error_folder_id:
-                    drive, _ = get_google_services()
-                    move_drive_file(
-                        drive,
-                        drive_file["id"],
-                        pending_folder_id,
-                        error_folder_id,
-                    )
-                    moved_to = "error"
-        except Exception:
-            moved_to = None
-
         return response_json(start_response, 500, {
             "ok": False,
             "error": error_payload(error),
-            "movedTo": moved_to,
-            "driveFile": {
-                "id": drive_file.get("id"),
-                "name": drive_file.get("name"),
-                "mimeType": drive_file.get("mimeType"),
-            } if drive_file else None,
         })
