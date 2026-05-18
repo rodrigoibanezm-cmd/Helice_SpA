@@ -151,7 +151,7 @@ def get_google_services():
             "token_uri": "https://oauth2.googleapis.com/token",
         },
         scopes=[
-            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive",
             "https://www.googleapis.com/auth/spreadsheets",
         ],
     )
@@ -173,6 +173,16 @@ def list_drive_files(drive, folder_id):
     ).execute()
 
     return response.get("files", [])
+
+
+def move_drive_file(drive, file_id, from_folder_id, to_folder_id):
+    return drive.files().update(
+        fileId=file_id,
+        addParents=to_folder_id,
+        removeParents=from_folder_id,
+        fields="id,name,parents",
+        supportsAllDrives=True,
+    ).execute()
 
 
 def download_file(drive, file_id):
@@ -323,6 +333,35 @@ def build_move_plan(image_files, processed_folder_id):
     ]
 
 
+def move_processed_files(drive, image_files, from_folder_id, processed_folder_id):
+    moved = []
+    errors = []
+
+    for file in image_files:
+        try:
+            move_result = move_drive_file(
+                drive,
+                file.get("id"),
+                from_folder_id,
+                processed_folder_id,
+            )
+            moved.append({
+                "fileId": file.get("id"),
+                "name": file.get("name"),
+                "target": "processed",
+                "result": move_result,
+            })
+        except Exception as error:
+            errors.append({
+                "fileId": file.get("id"),
+                "name": file.get("name"),
+                "target": "processed",
+                "error": str(error),
+            })
+
+    return moved, errors
+
+
 def app(environ, start_response):
     try:
         folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
@@ -371,6 +410,36 @@ def app(environ, start_response):
                 "totalImages": len(image_files),
                 "plannedMoves": len(move_plan),
                 "movePlan": move_plan,
+            })
+
+        if mode == "move":
+            processed_folder_id = os.environ.get("GOOGLE_DRIVE_PROCESSED_FOLDER_ID")
+            if not processed_folder_id:
+                return response_json(start_response, 500, {
+                    "ok": False,
+                    "runtime": "python",
+                    "mode": "move",
+                    "error": "Missing GOOGLE_DRIVE_PROCESSED_FOLDER_ID",
+                })
+
+            moved, move_errors = move_processed_files(
+                drive,
+                image_files,
+                folder_id,
+                processed_folder_id,
+            )
+
+            return response_json(start_response, 200, {
+                "ok": len(move_errors) == 0,
+                "runtime": "python",
+                "mode": "move",
+                "folderId": folder_id,
+                "target": "processed",
+                "totalImages": len(image_files),
+                "moved": len(moved),
+                "errors": len(move_errors),
+                "movedFiles": moved,
+                "moveErrors": move_errors,
             })
 
         if not os.environ.get("OPENAI_API_KEY"):
