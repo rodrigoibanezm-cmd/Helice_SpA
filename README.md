@@ -17,9 +17,7 @@ Upstash guarda respaldo y bitácora.
 Google Sheets recibe filas A:K solo para guías nuevas.
 ```
 
-## Estado operativo actual
-
-Flujo principal validado:
+## Flujo operativo validado
 
 ```txt
 Lovable / PowerShell
@@ -46,7 +44,7 @@ Estado validado:
 - bitácora append-only en Upstash
 ```
 
-## Endpoint principal para front
+## Endpoint principal
 
 ```txt
 POST /api/dev/upload-and-process.py?token=...
@@ -69,7 +67,7 @@ image/jpeg
 image/png
 ```
 
-Respuesta corta esperada:
+Respuesta esperada:
 
 ```json
 {
@@ -84,44 +82,14 @@ Respuesta corta esperada:
 }
 ```
 
-## Endpoint batch legacy
-
-```txt
-GET /api/dev/process-google.py
-```
-
-Wrapper legacy de:
-
-```txt
-api/dev/process_google.py
-```
-
-Uso actual:
-
-```txt
-- flujo Drive antiguo/manual
-- pruebas batch
-- respaldo operativo si se suben imágenes manualmente a Drive / pendientes
-```
-
-Modos disponibles:
-
-```txt
-mode=list          -> lista pendientes sin OpenAI
-mode=process       -> procesa batch completo
-mode=move-dry-run  -> muestra qué movería sin mover
-mode=move          -> mueve pendientes a procesadas
-```
-
 ## Reglas actuales
 
 ```txt
-- upload unitario no usa Drive
-- Drive queda solo para batch legacy
-- Vercel Blob conserva evidencia original
+- upload unitario usa Vercel Blob
 - Upstash decide duplicados por numero_guia
 - Google Sheets solo recibe guías nuevas
 - duplicados no se escriben en Sheets
+- Vercel Blob conserva evidencia original
 ```
 
 ## Formato aprobado de Google Sheets
@@ -150,8 +118,6 @@ destino_empresa - destino_direccion - destino_comuna
 
 ## Variables de entorno aprobadas
 
-Flujo principal:
-
 ```txt
 OPENAI_API_KEY
 GOOGLE_CLIENT_EMAIL
@@ -163,19 +129,10 @@ UPLOAD_PROCESS_TOKEN
 BLOB_READ_WRITE_TOKEN
 ```
 
-Flujo batch legacy Drive:
-
-```txt
-GOOGLE_DRIVE_FOLDER_ID
-GOOGLE_DRIVE_PROCESSED_FOLDER_ID
-GOOGLE_DRIVE_ERROR_FOLDER_ID
-```
-
 ## Runtime
 
 ```txt
 Python para el flujo principal.
-Node.js solo queda para pruebas antiguas/dev.
 ```
 
 ## Documentación
