@@ -16,7 +16,6 @@ from lib.guia_pipeline import (  # noqa: E402
     get_query_params,
     now_iso,
     process_image,
-    response_json,
     save_guia_envelope,
 )
 
@@ -24,6 +23,31 @@ ALLOWED_MIME_TYPES = frozenset({
     "image/jpeg",
     "image/png",
 })
+
+
+def response_json(start_response, status_code, payload):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    status = f"{status_code} {'OK' if status_code < 400 else 'ERROR'}"
+    headers = [
+        ("Content-Type", "application/json; charset=utf-8"),
+        ("Content-Length", str(len(body))),
+        ("Access-Control-Allow-Origin", "*"),
+        ("Access-Control-Allow-Methods", "POST, OPTIONS"),
+        ("Access-Control-Allow-Headers", "Content-Type"),
+    ]
+    start_response(status, headers)
+    return [body]
+
+
+def response_options(start_response):
+    headers = [
+        ("Access-Control-Allow-Origin", "*"),
+        ("Access-Control-Allow-Methods", "POST, OPTIONS"),
+        ("Access-Control-Allow-Headers", "Content-Type"),
+        ("Content-Length", "0"),
+    ]
+    start_response("204 OK", headers)
+    return [b""]
 
 
 def error_payload(error):
@@ -171,6 +195,10 @@ def process_uploaded_binary(filename, mime_type, binary, blob):
 
 def app(environ, start_response):
     try:
+        method = environ.get("REQUEST_METHOD", "GET").upper()
+        if method == "OPTIONS":
+            return response_options(start_response)
+
         query = get_query_params(environ)
 
         if not validate_token(query):
@@ -179,7 +207,7 @@ def app(environ, start_response):
                 "error": "invalid_token",
             })
 
-        if environ.get("REQUEST_METHOD", "GET").upper() != "POST":
+        if method != "POST":
             return response_json(start_response, 405, {
                 "ok": False,
                 "error": "method_not_allowed",
@@ -210,6 +238,7 @@ def app(environ, start_response):
             "ok": True,
             "estado": result.get("estado"),
             "numeroGuia": data.get("numero_guia", ""),
+            "camposDudosos": result.get("campos_dudosos", []),
             "duplicate": item.get("duplicate", False),
             "sheetWritten": item.get("sheetWritten", False),
             "storageKey": item.get("storageKey"),
