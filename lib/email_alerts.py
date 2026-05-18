@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 
 
-RESEND_API_URL = "https://api.resend.com/emails"
+SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 
 
 def parse_recipients(value):
@@ -13,9 +13,9 @@ def parse_recipients(value):
 
 def is_email_enabled():
     return bool(
-        os.environ.get("RESEND_API_KEY")
-        and os.environ.get("ALERT_EMAIL_FROM")
-        and os.environ.get("ALERT_EMAIL_TO")
+        os.environ.get("SENDGRID_API_KEY")
+        and os.environ.get("SENDGRID_FROM_EMAIL")
+        and os.environ.get("NOTIFY_TO_EMAIL")
     )
 
 
@@ -47,7 +47,7 @@ def build_email_html(numero_guia, estado, ai_audit, blob_url, sheet_url):
     """
 
 
-def resend_error_payload(error):
+def email_error_payload(error):
     payload = {
         "type": error.__class__.__name__,
         "message": str(error) or repr(error),
@@ -72,11 +72,13 @@ def send_guia_processed_email(numero_guia, estado, ai_audit, blob_url):
             "sent": False,
             "skipped": True,
             "reason": "missing_email_env",
+            "provider": "sendgrid",
         }
 
-    api_key = os.environ["RESEND_API_KEY"]
-    sender = os.environ["ALERT_EMAIL_FROM"]
-    recipients = parse_recipients(os.environ["ALERT_EMAIL_TO"])
+    api_key = os.environ["SENDGRID_API_KEY"]
+    sender_email = os.environ["SENDGRID_FROM_EMAIL"]
+    sender_name = os.environ.get("SENDGRID_FROM_NAME", "Guias Helice")
+    recipients = parse_recipients(os.environ["NOTIFY_TO_EMAIL"])
     sheet_url = os.environ.get("GOOGLE_SHEET_URL", "")
 
     if not recipients:
@@ -84,6 +86,7 @@ def send_guia_processed_email(numero_guia, estado, ai_audit, blob_url):
             "sent": False,
             "skipped": True,
             "reason": "empty_recipients",
+            "provider": "sendgrid",
         }
 
     subject = f"Guía procesada OK - Nº {numero_guia}"
@@ -96,14 +99,26 @@ def send_guia_processed_email(numero_guia, estado, ai_audit, blob_url):
     )
 
     payload = {
-        "from": sender,
-        "to": recipients,
+        "personalizations": [
+            {
+                "to": [{"email": email} for email in recipients]
+            }
+        ],
+        "from": {
+            "email": sender_email,
+            "name": sender_name,
+        },
         "subject": subject,
-        "html": html,
+        "content": [
+            {
+                "type": "text/html",
+                "value": html,
+            }
+        ],
     }
 
     request = urllib.request.Request(
-        RESEND_API_URL,
+        SENDGRID_API_URL,
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -118,15 +133,18 @@ def send_guia_processed_email(numero_guia, estado, ai_audit, blob_url):
             return {
                 "sent": True,
                 "skipped": False,
+                "provider": "sendgrid",
                 "to": recipients,
-                "from": sender,
+                "from": sender_email,
+                "status": response.status,
                 "response": json.loads(body) if body else None,
             }
     except Exception as error:
         return {
             "sent": False,
             "skipped": False,
+            "provider": "sendgrid",
             "to": recipients,
-            "from": sender,
-            "error": resend_error_payload(error),
+            "from": sender_email,
+            "error": email_error_payload(error),
         }
