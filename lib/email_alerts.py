@@ -1,5 +1,6 @@
 import json
 import os
+import urllib.error
 import urllib.request
 
 
@@ -46,6 +47,25 @@ def build_email_html(numero_guia, estado, ai_audit, blob_url, sheet_url):
     """
 
 
+def resend_error_payload(error):
+    payload = {
+        "type": error.__class__.__name__,
+        "message": str(error) or repr(error),
+    }
+
+    if isinstance(error, urllib.error.HTTPError):
+        payload["status"] = error.code
+        payload["reason"] = error.reason
+        try:
+            body = error.read().decode("utf-8")
+            payload["body"] = body
+            payload["parsed"] = json.loads(body) if body else None
+        except Exception:
+            pass
+
+    return payload
+
+
 def send_guia_processed_email(numero_guia, estado, ai_audit, blob_url):
     if not is_email_enabled():
         return {
@@ -58,6 +78,13 @@ def send_guia_processed_email(numero_guia, estado, ai_audit, blob_url):
     sender = os.environ["ALERT_EMAIL_FROM"]
     recipients = parse_recipients(os.environ["ALERT_EMAIL_TO"])
     sheet_url = os.environ.get("GOOGLE_SHEET_URL", "")
+
+    if not recipients:
+        return {
+            "sent": False,
+            "skipped": True,
+            "reason": "empty_recipients",
+        }
 
     subject = f"Guía procesada OK - Nº {numero_guia}"
     html = build_email_html(
@@ -85,10 +112,21 @@ def send_guia_processed_email(numero_guia, estado, ai_audit, blob_url):
         method="POST",
     )
 
-    with urllib.request.urlopen(request) as response:
-        body = response.read().decode("utf-8")
+    try:
+        with urllib.request.urlopen(request) as response:
+            body = response.read().decode("utf-8")
+            return {
+                "sent": True,
+                "skipped": False,
+                "to": recipients,
+                "from": sender,
+                "response": json.loads(body) if body else None,
+            }
+    except Exception as error:
         return {
-            "sent": True,
+            "sent": False,
             "skipped": False,
-            "response": json.loads(body) if body else None,
+            "to": recipients,
+            "from": sender,
+            "error": resend_error_payload(error),
         }
