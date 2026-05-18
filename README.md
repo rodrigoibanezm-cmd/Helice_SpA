@@ -26,6 +26,7 @@ Lovable / PowerShell
 → Vercel Blob guarda foto original
 → backend procesa archivo temporal
 → OpenAI Vision extrae y valida
+→ review IA si hay duda
 → normalización
 → Upstash guarda envelope por numero_guia
 → Google Sheets escribe si no es duplicado
@@ -42,6 +43,7 @@ Estado validado:
 - duplicados sí se guardan en Upstash con sufijo _resp
 - guía nueva se escribe correctamente en Google Sheets
 - bitácora append-only en Upstash
+- aiAudit informa por cuántos pasos IA pasó la guía
 ```
 
 ## Endpoint principal
@@ -77,9 +79,38 @@ Respuesta esperada:
   "duplicate": false,
   "sheetWritten": true,
   "storageKey": "helice:guia:numero:164468",
+  "aiAudit": {
+    "steps": ["extract", "validate"],
+    "stepsCount": 2,
+    "reviewApplied": false
+  },
   "blobUrl": "https://...",
   "blobPathname": "guias/...jpg"
 }
+```
+
+Si hubo review IA:
+
+```json
+{
+  "aiAudit": {
+    "steps": ["extract", "validate", "review"],
+    "stepsCount": 3,
+    "reviewApplied": true
+  }
+}
+```
+
+## Regla de revisión humana
+
+```txt
+estado = OK
+→ no requiere revisión humana
+→ campos_dudosos debe quedar []
+
+estado = REVISAR
+→ el front debe pedir validación humana
+→ campos_dudosos debe volver informado
 ```
 
 ## Reglas actuales
@@ -90,6 +121,7 @@ Respuesta esperada:
 - Google Sheets solo recibe guías nuevas
 - duplicados no se escriben en Sheets
 - Vercel Blob conserva evidencia original
+- aiAudit queda guardado en Upstash dentro del result
 ```
 
 ## Formato aprobado de Google Sheets
@@ -114,6 +146,18 @@ Destino se arma como:
 
 ```txt
 destino_empresa - destino_direccion - destino_comuna
+```
+
+## Escritura en Google Sheets
+
+```txt
+CAPTURA_ACTUAL
+- conserva encabezado fila 1
+- limpia datos desde A2:K
+- escribe la última guía en A2:K2
+
+HISTORICO
+- agrega cada guía nueva al final
 ```
 
 ## Variables de entorno aprobadas
