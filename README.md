@@ -2,7 +2,7 @@
 
 MVP de captura y procesamiento de guías de despacho para Helice SpA.
 
-El sistema recibe imágenes de guías, extrae datos con OpenAI Vision, normaliza el resultado, guarda respaldo estructurado en Upstash Redis, conserva la foto original en Vercel Blob y escribe filas limpias en Google Sheets según el formato solicitado por el cliente.
+El sistema recibe imágenes de guías, extrae datos con OpenAI Vision, normaliza el resultado, guarda respaldo estructurado en Upstash Redis, conserva la foto original en Vercel Blob, escribe filas limpias en Google Sheets según el formato solicitado por el cliente y envía alerta por correo vía SendGrid cuando una guía nueva queda escrita.
 
 Este README es solo el mapa ejecutivo. La verdad técnica vive en `docs/`.
 
@@ -15,6 +15,7 @@ Python procesa la guía.
 OpenAI extrae y valida.
 Upstash guarda respaldo y bitácora.
 Google Sheets recibe filas A:K solo para guías nuevas.
+SendGrid envía alerta desde backend.
 ```
 
 ## Flujo operativo validado
@@ -30,6 +31,7 @@ Lovable / PowerShell
 → normalización
 → Upstash guarda envelope por numero_guia
 → Google Sheets escribe si no es duplicado
+→ SendGrid envía alerta si la guía nueva queda OK y escrita
 → respuesta corta al front
 ```
 
@@ -42,6 +44,7 @@ Estado validado:
 - duplicados no se escriben en Sheets
 - duplicados sí se guardan en Upstash con sufijo _resp
 - guía nueva se escribe correctamente en Google Sheets
+- guía nueva OK dispara mail vía SendGrid desde backend
 - bitácora append-only en Upstash
 - aiAudit informa por cuántos pasos IA pasó la guía
 ```
@@ -79,6 +82,8 @@ Respuesta esperada:
   "duplicate": false,
   "sheetWritten": true,
   "storageKey": "helice:guia:numero:164468",
+  "emailSent": true,
+  "emailError": null,
   "aiAudit": {
     "steps": ["extract", "validate"],
     "stepsCount": 2,
@@ -113,6 +118,32 @@ estado = REVISAR
 → campos_dudosos debe volver informado
 ```
 
+## Regla de mail
+
+```txt
+Proveedor único: SendGrid.
+El front no decide destinatario.
+El backend lee NOTIFY_TO_EMAIL.
+El mail sale solo desde backend.
+```
+
+Se envía mail solo si:
+
+```txt
+estado = OK
+duplicate = false
+sheetWritten = true
+```
+
+No se envía mail si:
+
+```txt
+- la guía es duplicada
+- la guía queda REVISAR
+- la guía queda ERROR
+- no se escribió en Google Sheets
+```
+
 ## Reglas actuales
 
 ```txt
@@ -121,6 +152,7 @@ estado = REVISAR
 - Google Sheets solo recibe guías nuevas
 - duplicados no se escriben en Sheets
 - Vercel Blob conserva evidencia original
+- SendGrid notifica guías nuevas OK escritas
 - aiAudit queda guardado en Upstash dentro del result
 ```
 
@@ -167,10 +199,15 @@ OPENAI_API_KEY
 GOOGLE_CLIENT_EMAIL
 GOOGLE_PRIVATE_KEY
 GOOGLE_SHEET_ID
+GOOGLE_SHEET_URL
 KV_REST_API_URL
 KV_REST_API_TOKEN
 UPLOAD_PROCESS_TOKEN
 BLOB_READ_WRITE_TOKEN
+SENDGRID_API_KEY
+SENDGRID_FROM_EMAIL
+SENDGRID_FROM_NAME
+NOTIFY_TO_EMAIL
 ```
 
 ## Runtime
