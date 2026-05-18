@@ -240,6 +240,10 @@ def process_image(image_path):
             estado_final = "REVISAR"
 
         result["estado"] = estado_final
+        if estado_final == "OK":
+            result["campos_dudosos"] = []
+        else:
+            result["campos_dudosos"] = review.get("campos_dudosos", result.get("campos_dudosos", []))
         result["observaciones"] = review.get(
             "observaciones_finales",
             result["observaciones"],
