@@ -72,6 +72,22 @@ def build_ai_audit(review):
     }
 
 
+def safe_send_email(numero_guia, estado, ai_audit, blob_url):
+    try:
+        return send_guia_processed_email(
+            numero_guia=numero_guia,
+            estado=estado,
+            ai_audit=ai_audit,
+            blob_url=blob_url,
+        )
+    except Exception as error:
+        return {
+            "sent": False,
+            "skipped": False,
+            "error": error_payload(error),
+        }
+
+
 def read_json_body(environ):
     try:
         length = int(environ.get("CONTENT_LENGTH") or 0)
@@ -180,7 +196,7 @@ def process_uploaded_binary(filename, mime_type, binary, blob):
             sheet_written = True
 
             if result.get("estado") == "OK":
-                email_result = send_guia_processed_email(
+                email_result = safe_send_email(
                     numero_guia=result.get("data", {}).get("numero_guia", ""),
                     estado=result.get("estado"),
                     ai_audit=result.get("ai_audit", {}),
@@ -245,6 +261,7 @@ def app(environ, start_response):
 
         result = item.get("result", {})
         data = result.get("data", {})
+        email_result = item.get("emailResult") or {}
 
         return response_json(start_response, 200, {
             "ok": True,
@@ -254,7 +271,8 @@ def app(environ, start_response):
             "duplicate": item.get("duplicate", False),
             "sheetWritten": item.get("sheetWritten", False),
             "storageKey": item.get("storageKey"),
-            "emailSent": bool(item.get("emailResult", {}).get("sent")),
+            "emailSent": bool(email_result.get("sent")),
+            "emailError": email_result.get("error"),
             "aiAudit": item.get("aiAudit"),
             "blobUrl": blob.get("url"),
             "blobPathname": blob.get("pathname"),
