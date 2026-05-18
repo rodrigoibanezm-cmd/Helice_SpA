@@ -14,6 +14,7 @@ from guia_schema import normalize_result, VALID_STATES
 CAPTURA_SHEET = "CAPTURA_ACTUAL"
 HISTORICO_SHEET = "HISTORICO"
 SHEET_RANGE = "A:K"
+CAPTURA_DATA_RANGE = "A2:K"
 
 
 def now_iso():
@@ -192,13 +193,13 @@ def write_sheet_row(result):
 
     sheets.spreadsheets().values().clear(
         spreadsheetId=spreadsheet_id,
-        range=f"{CAPTURA_SHEET}!{SHEET_RANGE}",
+        range=f"{CAPTURA_SHEET}!{CAPTURA_DATA_RANGE}",
         body={},
     ).execute()
 
     sheets.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
-        range=f"{CAPTURA_SHEET}!A1:K1",
+        range=f"{CAPTURA_SHEET}!A2:K2",
         valueInputOption="RAW",
         body={"values": [row]},
     ).execute()
